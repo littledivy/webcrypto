@@ -8,9 +8,16 @@ macro_rules! extend_algorithm {
     (struct $name:ident {
         $(pub $field_name:ident: $field_type:ty,)*
     }) => {
+      #[derive(Copy, Clone)]
       pub struct $name {
         pub name: &'static str,
         $(pub $field_name: $field_type,)*
+      }
+
+      impl Into<Algorithm> for $name {
+        fn into(self) -> Algorithm {
+          Algorithm::$name(self)
+        }
       }
   };
 }
@@ -22,6 +29,7 @@ extend_algorithm!(
   }
 );
 
+#[derive(Copy, Clone)]
 pub enum Algorithm {
   RsaKeyGenAlgorithm(RsaKeyGenAlgorithm),
 }
@@ -38,6 +46,12 @@ pub enum KeyUsage {
   DeriveBits,
 }
 
+pub enum KeyType {
+  Public,
+  Private,
+  Secret,
+}
+
 pub struct CryptoKey<H> {
   /// Determine whether the key can be exportable or not.
   ///
@@ -47,13 +61,15 @@ pub struct CryptoKey<H> {
   /// key storage.
   pub extractable: bool,
   pub usages: Vec<KeyUsage>,
+  pub type_: KeyType,
+  pub algorithm: Algorithm,
 
   handle: H,
 }
 
 pub struct CryptoKeyPair<H> {
-  private_key: CryptoKey<H>,
-  public_key: CryptoKey<H>,
+  pub private_key: CryptoKey<H>,
+  pub public_key: CryptoKey<H>,
 }
 
 pub enum CryptoKeyOrPair<H> {
@@ -81,16 +97,13 @@ impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
 impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
   pub fn generate_key(
     &mut self,
-    algorithm: &Algorithm,
+    algorithm: Algorithm,
     extractable: bool,
     usages: Vec<KeyUsage>,
   ) -> Result<CryptoKeyOrPair<S::Handle>, ()> {
-    // Step 2 is ensured by the type system.
-
-    // Step 3.
     match algorithm {
-      Algorithm::RsaKeyGenAlgorithm(algorithm) => {
-        match algorithm.name {
+      Algorithm::RsaKeyGenAlgorithm(ref rsa_alg) => {
+        match rsa_alg.name {
           "RSASSA-PKCS1-v1_5" | "RSA-PSS" => {
             // 1.
             if usages
@@ -101,6 +114,7 @@ impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
               .is_some()
             {
               // SyntaxError.
+              return Err(());
             }
 
             // 2.
@@ -112,11 +126,15 @@ impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
                 extractable,
                 usages: usages.clone(),
                 handle,
+                type_: KeyType::Private,
+                algorithm,
               },
               public_key: CryptoKey {
                 extractable,
                 usages,
                 handle,
+                type_: KeyType::Public,
+                algorithm,
               },
             };
 

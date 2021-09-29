@@ -89,14 +89,25 @@ mod tests {
   fn test_generate_key() {
     let mut ctx = Context::new(rand::thread_rng(), InMemoryVault(vec![]));
 
-    let key = ctx.subtle.generate_key(
-      &subtle::Algorithm::RsaKeyGenAlgorithm(subtle::RsaKeyGenAlgorithm {
-        modulus_length: 2048,
-        public_exponent: [0x01, 0x00, 0x01],
-        name: "RSA-PSS",
-      }),
-      true,
-      vec![],
-    );
+    let key = ctx
+      .subtle
+      .generate_key(
+        subtle::RsaKeyGenAlgorithm {
+          modulus_length: 2048,
+          public_exponent: [0x01, 0x00, 0x01],
+          name: "RSA-PSS",
+        }
+        .into(),
+        true,
+        vec![],
+      )
+      .unwrap();
+
+    if let subtle::CryptoKeyOrPair::CryptoKeyPair(key) = key {
+      assert_eq!(key.public_key.extractable, true);
+      assert_eq!(key.private_key.extractable, true);
+    } else {
+      panic!("Expected CryptoKeyPair");
+    }
   }
 }
