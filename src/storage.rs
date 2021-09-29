@@ -1,7 +1,7 @@
 /// An opaque wrapper to protect direct access
 /// to the underlying key material.
 #[derive(PartialEq)]
-pub struct KeyMaterial<'a>(&'a [u8]);
+pub struct KeyMaterial<'a>(pub(crate) &'a [u8]);
 
 impl<const N: usize> PartialEq<[u8; N]> for KeyMaterial<'_> {
   fn eq(&self, other: &[u8; N]) -> bool {
@@ -34,7 +34,7 @@ impl<const N: usize> PartialEq<[u8; N]> for KeyMaterial<'_> {
 /// ```
 pub trait KeyStorage<'a> {
   /// The type of the handle to represent a stored key.
-  type Handle;
+  type Handle: Copy;
 
   /// Store the given key in the storage.
   /// Returns a handle that can be used to retrieve the key later.
