@@ -92,7 +92,7 @@ mod tests {
     let key = ctx
       .subtle
       .generate_key(
-        subtle::RsaKeyGenAlgorithm {
+        subtle::RsaKeyGenParams {
           modulus_length: 2048,
           public_exponent: [0x01, 0x00, 0x01],
           name: "RSA-PSS",

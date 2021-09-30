@@ -4,34 +4,136 @@ use rand::RngCore;
 use crate::storage::KeyMaterial;
 use crate::storage::KeyStorage;
 
-macro_rules! extend_algorithm {
-    (struct $name:ident {
-        $(pub $field_name:ident: $field_type:ty,)*
-    }) => {
-      #[derive(Copy, Clone)]
-      pub struct $name {
-        pub name: &'static str,
-        $(pub $field_name: $field_type,)*
-      }
-
-      impl Into<Algorithm> for $name {
-        fn into(self) -> Algorithm {
-          Algorithm::$name(self)
-        }
-      }
+macro_rules! impl_algorithm {
+  (struct $name:ident {
+        $($field_name:ident: $field_type:ty,)*
+  }) => {
+    #[derive(Copy, Clone)]
+    pub struct $name {
+      pub name: &'static str,
+      $(pub $field_name: $field_type,)*
+    }
   };
+  (struct $name:ident {
+    $($field_name:ident: $field_type:ty,)*
+  }, $counterpart: ident) => {
+    #[derive(Copy, Clone)]
+    pub struct $name {
+      pub name: &'static str,
+      $(pub $field_name: $field_type,)*
+    }
+
+    impl Into<KeyGenParams> for $name {
+      fn into(self) -> KeyGenParams {
+        KeyGenParams::$name(self)
+      }
+    }
+
+    #[derive(Copy, Clone)]
+    pub struct $counterpart {
+      pub name: &'static str,
+      $(pub $field_name: $field_type,)*
+    }
+
+    impl Into<Algorithm> for $counterpart {
+      fn into(self) -> Algorithm {
+        Algorithm::$counterpart(self)
+      }
+    }
+
+    impl Into<Algorithm> for $name {
+      fn into(self) -> Algorithm {
+        Algorithm::$counterpart($counterpart {
+          name: self.name,
+          $($field_name: self.$field_name,)*
+        })
+      }
+    }
+ };
 }
 
-extend_algorithm!(
-  struct RsaKeyGenAlgorithm {
-    pub modulus_length: usize,
-    pub public_exponent: [u8; 3],
-  }
+#[non_exhaustive]
+#[derive(Copy, Clone)]
+pub enum NamedCurve {
+  /// NIST P-256 (secp256r1)
+  P256,
+  /// NIST P-384 (secp384r1)
+  P384,
+  /// NIST P-521 (secp512r1)
+  P521,
+}
+
+impl_algorithm!(
+  struct HashAlgorithmIdentifer {}
+);
+
+impl_algorithm!(
+  struct RsaKeyGenParams {
+    modulus_length: usize,
+    public_exponent: [u8; 3],
+  },
+  RsaKeyAlgorithm
+);
+
+impl_algorithm!(
+  struct RsaHashedKeyGenParams {
+    hash: HashAlgorithmIdentifer,
+    modulus_length: usize,
+    public_exponent: [u8; 3],
+  },
+  RsaHashedKeyAlgorithm
+);
+
+impl_algorithm!(
+  struct EcKeyGenParams {
+    named_curve: NamedCurve,
+  },
+  EcKeyAlgorithm
+);
+
+impl_algorithm!(
+  struct AesKeyGenParams {
+    length: usize,
+  },
+  AesKeyAlgorithm
+);
+
+impl_algorithm!(
+  struct HmacKeyGenParams {
+    hash: HashAlgorithmIdentifer,
+    length: usize,
+  },
+  HmacKeyAlgorithm
 );
 
 #[derive(Copy, Clone)]
+pub enum KeyGenParams {
+  RsaKeyGenParams(RsaKeyGenParams),
+  RsaHashedKeyGenParams(RsaHashedKeyGenParams),
+  EcKeyGenParams(EcKeyGenParams),
+  AesKeyGenParams(AesKeyGenParams),
+  HmacKeyGenParams(HmacKeyGenParams),
+}
+
+#[derive(Copy, Clone)]
 pub enum Algorithm {
-  RsaKeyGenAlgorithm(RsaKeyGenAlgorithm),
+  RsaKeyAlgorithm(RsaKeyAlgorithm),
+  RsaHashedKeyAlgorithm(RsaHashedKeyAlgorithm),
+  EcKeyAlgorithm(EcKeyAlgorithm),
+  AesKeyAlgorithm(AesKeyAlgorithm),
+  HmacKeyAlgorithm(HmacKeyAlgorithm),
+}
+
+impl Into<Algorithm> for KeyGenParams {
+  fn into(self) -> Algorithm {
+    match self {
+      KeyGenParams::RsaKeyGenParams(params) => params.into(),
+      KeyGenParams::RsaHashedKeyGenParams(params) => params.into(),
+      KeyGenParams::EcKeyGenParams(params) => params.into(),
+      KeyGenParams::AesKeyGenParams(params) => params.into(),
+      KeyGenParams::HmacKeyGenParams(params) => params.into(),
+    }
+  }
 }
 
 #[derive(PartialEq, Clone)]
@@ -97,12 +199,12 @@ impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
 impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
   pub fn generate_key(
     &mut self,
-    algorithm: Algorithm,
+    algorithm: KeyGenParams,
     extractable: bool,
     usages: Vec<KeyUsage>,
   ) -> Result<CryptoKeyOrPair<S::Handle>, ()> {
     match algorithm {
-      Algorithm::RsaKeyGenAlgorithm(ref rsa_alg) => {
+      KeyGenParams::RsaKeyGenParams(ref rsa_alg) => {
         match rsa_alg.name {
           "RSASSA-PKCS1-v1_5" | "RSA-PSS" => {
             // 1.
@@ -127,14 +229,14 @@ impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
                 usages: usages.clone(),
                 handle,
                 type_: KeyType::Private,
-                algorithm,
+                algorithm: algorithm.into(),
               },
               public_key: CryptoKey {
                 extractable,
                 usages,
                 handle,
                 type_: KeyType::Public,
-                algorithm,
+                algorithm: algorithm.into(),
               },
             };
 
