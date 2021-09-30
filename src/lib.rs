@@ -139,7 +139,10 @@ mod tests {
       let sig = ctx
         .subtle
         .sign(
-          subtle::SignParams::RsaPssParams (subtle::RsaPssParams { name: "RSA-PSS", salt_length: 20 }),
+          subtle::SignParams::RsaPssParams(subtle::RsaPssParams {
+            name: "RSA-PSS",
+            salt_length: 20,
+          }),
           &key.private_key,
           b"Hello, world!",
         )
@@ -148,7 +151,10 @@ mod tests {
       let verified = ctx
         .subtle
         .verify(
-          subtle::SignParams::RsaPssParams (subtle::RsaPssParams { name: "RSA-PSS", salt_length: 20 }),
+          subtle::SignParams::RsaPssParams(subtle::RsaPssParams {
+            name: "RSA-PSS",
+            salt_length: 20,
+          }),
           &key.public_key,
           &sig,
           b"Hello, world!",
