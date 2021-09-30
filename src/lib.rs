@@ -111,4 +111,52 @@ mod tests {
       panic!("Expected CryptoKeyPair");
     }
   }
+
+  #[test]
+  fn test_sign_verify() {
+    let rng = rand::rngs::OsRng;
+    let mut ctx = Context::new(rng, InMemoryVault(vec![]));
+
+    let key = ctx
+      .subtle
+      .generate_key(
+        subtle::RsaHashedKeyGenParams {
+          modulus_length: 2048,
+          public_exponent: [0x01, 0x00, 0x01],
+          name: "RSA-PSS",
+          hash: subtle::HashAlgorithmIdentifer { name: "SHA-256" },
+        }
+        .into(),
+        true,
+        vec![],
+      )
+      .unwrap();
+
+    if let subtle::CryptoKeyOrPair::CryptoKeyPair(key) = key {
+      assert_eq!(key.public_key.extractable, true);
+      assert_eq!(key.private_key.extractable, true);
+
+      let sig = ctx
+        .subtle
+        .sign(
+          subtle::SignParams::RsaPssParams (subtle::RsaPssParams { name: "RSA-PSS", salt_length: 20 }),
+          &key.private_key,
+          b"Hello, world!",
+        )
+        .unwrap();
+
+      let verified = ctx
+        .subtle
+        .verify(
+          subtle::SignParams::RsaPssParams (subtle::RsaPssParams { name: "RSA-PSS", salt_length: 20 }),
+          &key.public_key,
+          &sig,
+          b"Hello, world!",
+        )
+        .unwrap();
+      assert_eq!(verified, true);
+    } else {
+      panic!("Expected CryptoKeyPair");
+    }
+  }
 }

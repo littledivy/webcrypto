@@ -5,6 +5,7 @@ use rsa::padding::PaddingScheme;
 use rsa::pkcs1::FromRsaPrivateKey;
 use rsa::pkcs1::ToRsaPrivateKey;
 use rsa::BigUint;
+use rsa::PublicKey;
 use rsa::RsaPrivateKey;
 
 use sha1::Sha1;
@@ -84,6 +85,12 @@ impl_algorithm!(
 );
 
 impl_algorithm!(
+  struct RsaPssParams {
+    salt_length: usize,
+  }
+);
+
+impl_algorithm!(
   struct RsaKeyGenParams {
     modulus_length: usize,
     public_exponent: [u8; 3],
@@ -138,6 +145,12 @@ pub enum Algorithm {
   EcKeyAlgorithm(EcKeyAlgorithm),
   AesKeyAlgorithm(AesKeyAlgorithm),
   HmacKeyAlgorithm(HmacKeyAlgorithm),
+}
+
+#[derive(Copy, Clone)]
+pub enum SignParams {
+  RsaPssParams(RsaPssParams),
+  AlgorithmIdentifer(AlgorithmIdentifer),
 }
 
 impl Into<Algorithm> for KeyGenParams {
@@ -316,12 +329,14 @@ impl<R: 'static + RngCore + CryptoRng + Copy, S: KeyStorage>
 {
   pub fn sign(
     &mut self,
-    algorithm: &AlgorithmIdentifer,
+    algorithm: SignParams,
     key: &CryptoKey<S::Handle>,
     data: &[u8],
   ) -> Result<Vec<u8>, ()> {
-    match algorithm.name {
-      "RSASSA-PKCS1-v1_5" => {
+    match algorithm {
+      SignParams::AlgorithmIdentifer(AlgorithmIdentifer {
+        name: "RSASSA-PKCS1-v1_5",
+      }) => {
         if key.type_ != KeyType::Private {
           // InvalidAccessError.
         }
@@ -384,7 +399,11 @@ impl<R: 'static + RngCore + CryptoRng + Copy, S: KeyStorage>
 
         Ok(sig)
       }
-      "RSA-PSS" => {
+      SignParams::RsaPssParams(RsaPssParams {
+        name: "RSA-PSS",
+        salt_length,
+        ..
+      }) => {
         if key.type_ != KeyType::Private {
           // InvalidAccessError.
         }
@@ -392,7 +411,7 @@ impl<R: 'static + RngCore + CryptoRng + Copy, S: KeyStorage>
         let key_material = self.storage.get(key.handle).unwrap();
         let private_key =
           RsaPrivateKey::from_pkcs1_der(&key_material.0).map_err(|_| ())?;
-        let salt_len = 10;
+
         let (padding, digest_in) = match key.algorithm {
           Algorithm::RsaHashedKeyAlgorithm(alg) => {
             match alg.hash.name {
@@ -401,7 +420,8 @@ impl<R: 'static + RngCore + CryptoRng + Copy, S: KeyStorage>
                 hasher.update(&data);
                 (
                   PaddingScheme::new_pss_with_salt::<Sha1, _>(
-                    self.rng, salt_len,
+                    self.rng,
+                    salt_length,
                   ),
                   hasher.finalize()[..].to_vec(),
                 )
@@ -411,7 +431,8 @@ impl<R: 'static + RngCore + CryptoRng + Copy, S: KeyStorage>
                 hasher.update(&data);
                 (
                   PaddingScheme::new_pss_with_salt::<Sha256, _>(
-                    self.rng, salt_len,
+                    self.rng,
+                    salt_length,
                   ),
                   hasher.finalize()[..].to_vec(),
                 )
@@ -421,7 +442,8 @@ impl<R: 'static + RngCore + CryptoRng + Copy, S: KeyStorage>
                 hasher.update(&data);
                 (
                   PaddingScheme::new_pss_with_salt::<Sha384, _>(
-                    self.rng, salt_len,
+                    self.rng,
+                    salt_length,
                   ),
                   hasher.finalize()[..].to_vec(),
                 )
@@ -431,7 +453,8 @@ impl<R: 'static + RngCore + CryptoRng + Copy, S: KeyStorage>
                 hasher.update(&data);
                 (
                   PaddingScheme::new_pss_with_salt::<Sha512, _>(
-                    self.rng, salt_len,
+                    self.rng,
+                    salt_length,
                   ),
                   hasher.finalize()[..].to_vec(),
                 )
@@ -447,6 +470,155 @@ impl<R: 'static + RngCore + CryptoRng + Copy, S: KeyStorage>
         let sig = private_key.sign(padding, &digest_in).map_err(|_| ())?;
 
         Ok(sig)
+      }
+      _ => todo!(),
+    }
+  }
+
+  pub fn verify(
+    &mut self,
+    algorithm: SignParams,
+    key: &CryptoKey<S::Handle>,
+    signature: &[u8],
+    data: &[u8],
+  ) -> Result<bool, ()> {
+    match algorithm {
+      SignParams::AlgorithmIdentifer(AlgorithmIdentifer {
+        name: "RSASSA-PKCS1-v1_5",
+      }) => {
+        if key.type_ != KeyType::Public {
+          // InvalidAccessError.
+        }
+
+        let key_material = self.storage.get(key.handle).unwrap();
+        let private_key =
+          RsaPrivateKey::from_pkcs1_der(&key_material.0).map_err(|_| ())?;
+        let (padding, digest_in) = match key.algorithm {
+          Algorithm::RsaHashedKeyAlgorithm(alg) => {
+            match alg.hash.name {
+              "SHA-1" => {
+                let mut hasher = Sha1::new();
+                hasher.update(&data);
+                (
+                  PaddingScheme::PKCS1v15Sign {
+                    hash: Some(rsa::hash::Hash::SHA1),
+                  },
+                  hasher.finalize()[..].to_vec(),
+                )
+              }
+              "SHA-256" => {
+                let mut hasher = Sha256::new();
+                hasher.update(&data);
+                (
+                  PaddingScheme::PKCS1v15Sign {
+                    hash: Some(rsa::hash::Hash::SHA2_256),
+                  },
+                  hasher.finalize()[..].to_vec(),
+                )
+              }
+              "SHA-384" => {
+                let mut hasher = Sha384::new();
+                hasher.update(&data);
+                (
+                  PaddingScheme::PKCS1v15Sign {
+                    hash: Some(rsa::hash::Hash::SHA2_384),
+                  },
+                  hasher.finalize()[..].to_vec(),
+                )
+              }
+              "SHA-512" => {
+                let mut hasher = Sha512::new();
+                hasher.update(&data);
+                (
+                  PaddingScheme::PKCS1v15Sign {
+                    hash: Some(rsa::hash::Hash::SHA2_512),
+                  },
+                  hasher.finalize()[..].to_vec(),
+                )
+              }
+              _ => {
+                // SyntaxError.
+                return Err(());
+              }
+            }
+          }
+          _ => unreachable!(),
+        };
+        let verify = private_key.verify(padding, &digest_in, signature).is_ok();
+
+        Ok(verify)
+      }
+      SignParams::RsaPssParams(RsaPssParams {
+        name: "RSA-PSS",
+        salt_length,
+        ..
+      }) => {
+        if key.type_ != KeyType::Private {
+          // InvalidAccessError.
+        }
+
+        let key_material = self.storage.get(key.handle).unwrap();
+        let private_key =
+          RsaPrivateKey::from_pkcs1_der(&key_material.0).map_err(|_| ())?;
+
+        let (padding, digest_in) = match key.algorithm {
+          Algorithm::RsaHashedKeyAlgorithm(alg) => {
+            match alg.hash.name {
+              "SHA-1" => {
+                let mut hasher = Sha1::new();
+                hasher.update(&data);
+                (
+                  PaddingScheme::new_pss_with_salt::<Sha1, _>(
+                    self.rng,
+                    salt_length,
+                  ),
+                  hasher.finalize()[..].to_vec(),
+                )
+              }
+              "SHA-256" => {
+                let mut hasher = Sha256::new();
+                hasher.update(&data);
+                (
+                  PaddingScheme::new_pss_with_salt::<Sha256, _>(
+                    self.rng,
+                    salt_length,
+                  ),
+                  hasher.finalize()[..].to_vec(),
+                )
+              }
+              "SHA-384" => {
+                let mut hasher = Sha384::new();
+                hasher.update(&data);
+                (
+                  PaddingScheme::new_pss_with_salt::<Sha384, _>(
+                    self.rng,
+                    salt_length,
+                  ),
+                  hasher.finalize()[..].to_vec(),
+                )
+              }
+              "SHA-512" => {
+                let mut hasher = Sha512::new();
+                hasher.update(&data);
+                (
+                  PaddingScheme::new_pss_with_salt::<Sha512, _>(
+                    self.rng,
+                    salt_length,
+                  ),
+                  hasher.finalize()[..].to_vec(),
+                )
+              }
+              _ => {
+                // SyntaxError.
+                return Err(());
+              }
+            }
+          }
+          _ => unreachable!(),
+        };
+        let verify = private_key.verify(padding, &digest_in, signature).is_ok();
+
+        Ok(verify)
       }
       _ => todo!(),
     }
