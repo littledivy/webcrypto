@@ -1,6 +1,10 @@
 use rand::CryptoRng;
 use rand::RngCore;
 
+use rsa::pkcs1::ToRsaPrivateKey;
+use rsa::BigUint;
+use rsa::RsaPrivateKey;
+
 use crate::storage::KeyMaterial;
 use crate::storage::KeyStorage;
 
@@ -179,24 +183,18 @@ pub enum CryptoKeyOrPair<H> {
   CryptoKeyPair(CryptoKeyPair<H>),
 }
 
-pub struct SubtleCrypto<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> {
+pub struct SubtleCrypto<R: RngCore + CryptoRng, S: KeyStorage> {
   pub(crate) rng: R,
   storage: S,
-
-  _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
+impl<R: RngCore + CryptoRng, S: KeyStorage> SubtleCrypto<R, S> {
   pub fn new(rng: R, storage: S) -> Self {
-    SubtleCrypto {
-      rng,
-      storage,
-      _marker: std::marker::PhantomData,
-    }
+    SubtleCrypto { rng, storage }
   }
 }
 
-impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
+impl<R: RngCore + CryptoRng, S: KeyStorage> SubtleCrypto<R, S> {
   pub fn generate_key(
     &mut self,
     algorithm: KeyGenParams,
@@ -204,9 +202,9 @@ impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
     usages: Vec<KeyUsage>,
   ) -> Result<CryptoKeyOrPair<S::Handle>, ()> {
     match algorithm {
-      KeyGenParams::RsaKeyGenParams(ref rsa_alg) => {
+      KeyGenParams::RsaHashedKeyGenParams(ref rsa_alg) => {
         match rsa_alg.name {
-          "RSASSA-PKCS1-v1_5" | "RSA-PSS" => {
+          "RSASSA-PKCS1-v1_5" | "RSA-PSS" | "RSA-OAEP" => {
             // 1.
             if usages
               .iter()
@@ -220,9 +218,19 @@ impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
             }
 
             // 2.
-            let key_data = KeyMaterial(&[0; 10]);
+            let exp = BigUint::from_bytes_be(&rsa_alg.public_exponent);
+            let p_key = RsaPrivateKey::new_with_exp(
+              &mut self.rng,
+              rsa_alg.modulus_length,
+              &exp,
+            )
+            .map_err(|_| ())?;
 
-            let handle = self.storage.store(key_data);
+            let pkcs1 = p_key.to_pkcs1_der().map_err(|_| ())?;
+
+            let handle =
+              self.storage.store(KeyMaterial(pkcs1.as_ref().to_vec()));
+
             let key_pair = CryptoKeyPair {
               private_key: CryptoKey {
                 extractable,
@@ -241,6 +249,46 @@ impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> SubtleCrypto<'a, R, S> {
             };
 
             Ok(CryptoKeyOrPair::CryptoKeyPair(key_pair))
+          }
+          _ => todo!(),
+        }
+      }
+      KeyGenParams::AesKeyGenParams(ref aes_alg) => match aes_alg.name {
+        "AES-CTR" | "AES-CBC" | "AES-GCM" | "AES-KW" => {
+          let mut key_data = vec![0u8; aes_alg.length];
+          self.rng.fill_bytes(&mut key_data);
+          let handle = self.storage.store(KeyMaterial(key_data));
+
+          let key = CryptoKey {
+            extractable,
+            usages,
+            handle,
+            type_: KeyType::Secret,
+            algorithm: algorithm.into(),
+          };
+
+          Ok(CryptoKeyOrPair::CryptoKey(key))
+        }
+        _ => todo!(),
+      },
+      KeyGenParams::HmacKeyGenParams(ref hmac_alg) => {
+        match hmac_alg.name {
+          "HMAC" => {
+            // TODO: length is optional, default to digest block length
+            let mut key_data = vec![0u8; hmac_alg.length];
+            self.rng.fill_bytes(&mut key_data);
+
+            let handle = self.storage.store(KeyMaterial(key_data));
+
+            let key = CryptoKey {
+              extractable,
+              usages,
+              handle,
+              type_: KeyType::Secret,
+              algorithm: algorithm.into(),
+            };
+
+            Ok(CryptoKeyOrPair::CryptoKey(key))
           }
           _ => todo!(),
         }

@@ -14,18 +14,18 @@ pub use rand;
 ///
 /// An application may use multiple contexts
 /// the operation is not expensive.
-pub struct Context<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> {
-  pub subtle: SubtleCrypto<'a, R, S>,
+pub struct Context<R: RngCore + CryptoRng, S: KeyStorage> {
+  pub subtle: SubtleCrypto<R, S>,
 }
 
-impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> Context<'a, R, S> {
+impl<R: RngCore + CryptoRng, S: KeyStorage> Context<R, S> {
   pub fn new(rng: R, storage: S) -> Self {
     let subtle = SubtleCrypto::new(rng, storage);
     Context { subtle }
   }
 }
 
-impl<'a, R: RngCore + CryptoRng, S: KeyStorage<'a>> Context<'a, R, S> {
+impl<R: RngCore + CryptoRng, S: KeyStorage> Context<R, S> {
   pub fn get_random_values(&mut self, slice: &mut [u8]) {
     if slice.len() > 65536 {
       // QuotaExceededError
@@ -54,17 +54,17 @@ mod tests {
   use storage::KeyStorage;
 
   // FIXME: Duplicate code from src/storage.rs
-  pub struct InMemoryVault<'a>(Vec<KeyMaterial<'a>>);
+  pub struct InMemoryVault(Vec<KeyMaterial>);
 
-  impl<'a> KeyStorage<'a> for InMemoryVault<'a> {
+  impl KeyStorage for InMemoryVault {
     type Handle = usize;
 
-    fn store(&mut self, key: KeyMaterial<'a>) -> usize {
+    fn store(&mut self, key: KeyMaterial) -> usize {
       self.0.push(key);
       self.0.len() - 1
     }
 
-    fn get(&self, handle: usize) -> Option<&KeyMaterial<'a>> {
+    fn get(&self, handle: usize) -> Option<&KeyMaterial> {
       self.0.get(handle)
     }
   }
@@ -92,10 +92,11 @@ mod tests {
     let key = ctx
       .subtle
       .generate_key(
-        subtle::RsaKeyGenParams {
+        subtle::RsaHashedKeyGenParams {
           modulus_length: 2048,
           public_exponent: [0x01, 0x00, 0x01],
           name: "RSA-PSS",
+          hash: subtle::HashAlgorithmIdentifer { name: "SHA-256" },
         }
         .into(),
         true,
