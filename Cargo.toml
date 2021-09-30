@@ -9,3 +9,5 @@ edition = "2021"
 rand = "0.8.4"
 uuid = { version = "0.8.2" }
 rsa = { version = "0.5.0", default-features = false, features = ["std"] }
+sha-1 = "0.9.7"
+sha2 = "0.9.5"
